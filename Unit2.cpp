@@ -25,10 +25,14 @@ void __fastcall TForm2::Button1Click(TObject *Sender)
 void __fastcall TForm2::Button2Click(TObject *Sender)
 {
 	//Остановка потока
-	ReadThreadPtr->Terminate();
-	Form2->Label5->Visible = True;
-	Form2->Label5->Caption = "Поток остановлен";
+	if (ReadThreadPtr)
+	{
+		ReadThreadPtr->Terminate();
+		Form2->Label5->Visible = True;
+		Form2->Label5->Caption = "Поток остановлен";
+	}
 }
 //---------------------------------------------------------------------------
+
 
 

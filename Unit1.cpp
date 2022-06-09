@@ -6,6 +6,7 @@
 #include "Unit1.h"
 #include "Unit2.h"
 #include "Unit3.h"
+#include "NTFSDriverPCH1.h"
 
 #include<iostream>
 #include<Windows.h>
@@ -40,7 +41,7 @@ void __fastcall ReadThread::Execute()
 	wchar_t Path[64];
 	UnicodeString deviceName = Form2->Edit1->Text;
 	wchar_t EditText = deviceName.w_str()[0];
-	swprintf(Path,L"\\\\.\\%c:",EditText);
+	swprintf(Path,L"\\\\.\\PhysicalDrive%c",EditText);
 
 	if ((partition = CreateFileW(Path,
 		GENERIC_READ,
@@ -52,12 +53,11 @@ void __fastcall ReadThread::Execute()
 	{
 		Form2->Label5->Visible = True;
 		Form2->Label5->Caption = "Ошибка чтения раздела";
-		cout << "Error: " << GetLastError() << endl;
 	}
 
 	if (!DeviceIoControl(partition,
-        IOCTL_DISK_GET_DRIVE_GEOMETRY,
-        NULL,
+		IOCTL_DISK_GET_DRIVE_GEOMETRY,
+		NULL,
 		0,
         &diskGeometry,
 		sizeof (DISK_GEOMETRY),
@@ -65,47 +65,74 @@ void __fastcall ReadThread::Execute()
         (LPOVERLAPPED)NULL))
 	{
 		Form2->Label5->Visible = True;
-		Form2->Label5->Caption = "Ошибка чтения раздела";
-		cout << "Error: " << GetLastError() << endl;
+		Form2->Label5->Caption = "Ошибка определения геометрии диска";
+
+		char errMsg[65];
+		DWORD dw = GetLastError();
+
+		FormatMessageA(
+			FORMAT_MESSAGE_FROM_SYSTEM |
+			FORMAT_MESSAGE_IGNORE_INSERTS,
+			NULL,
+			dw,
+			MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+			(LPSTR)&errMsg,
+			sizeof(errMsg), NULL );
+
+		Form2->Label7->Caption = errMsg;
 		CloseHandle(partition);
+
+		ProcessThreadPtr->Terminate();
+		delete ProcessThreadPtr;
 	}
 
-    if (!DeviceIoControl(partition,
+	if (!DeviceIoControl(partition,
 		IOCTL_DISK_GET_PARTITION_INFO,
-        NULL,
-        0,
+		NULL,
+		0,
 		&partitionInfo,
 		sizeof (PARTITION_INFORMATION),
-        &bytesReturned,
-        (LPOVERLAPPED)NULL))
+		&bytesReturned,
+		(LPOVERLAPPED)NULL))
 	{
 		Form2->Label5->Visible = True;
 		Form2->Label5->Caption = "Ошибка определения сведений о разделе";
-		cout << "Error: " << GetLastError() << endl;
+		char errMsg[65];
+		DWORD dw = GetLastError();
+
+		FormatMessageA(
+			FORMAT_MESSAGE_FROM_SYSTEM |
+			FORMAT_MESSAGE_IGNORE_INSERTS,
+			NULL,
+			dw,
+			MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+			(LPSTR)&errMsg,
+			sizeof(errMsg), NULL );
+
+		Form2->Label7->Caption = errMsg;
 		CloseHandle(partition);
 	}
 
 
-	deviceName = Form2->Edit1->Text;
+	deviceName = Form2->Edit2->Text;
 	EditText = deviceName.w_str()[0];
-	swprintf(Path,L"\\\\.\\%c:\\partition.img",EditText);
+	swprintf(Path,L"%c:\\partition.img",EditText);
 
 	if ((file = CreateFileW(Path,
-        GENERIC_READ | GENERIC_WRITE,
-        0,
+		GENERIC_READ | GENERIC_WRITE,
+		0,
 		NULL,
-        CREATE_ALWAYS,
+		CREATE_ALWAYS,
 		0,
 		NULL)) == INVALID_HANDLE_VALUE)
 	{
 		Form2->Label5->Visible = True;
-		Form2->Label5->Caption = "Ошибка определения записываемого файла";
-		cout << "Error: " << GetLastError() << endl;
-        CloseHandle(partition);
+		Form2->Label5->Caption = GetLastError();
+		CloseHandle(partition);
 
     }
 
-    if (!SetFilePointerEx(file, partitionInfo.PartitionLength, NULL, FILE_BEGIN))
+	if (!SetFilePointerEx(file, partitionInfo.PartitionLength, NULL, FILE_BEGIN))
 	{
 		Form2->Label5->Visible = True;
 		Form2->Label5->Caption = "Ошибка установки указателя";
@@ -117,6 +144,20 @@ void __fastcall ReadThread::Execute()
 	{
 		Form2->Label5->Visible = True;
 		Form2->Label5->Caption = "Ошибка определения размера файла";
+
+		char errMsg[65];
+		DWORD dw = GetLastError();
+
+		FormatMessageA(
+			FORMAT_MESSAGE_FROM_SYSTEM |
+			FORMAT_MESSAGE_IGNORE_INSERTS,
+			NULL,
+			dw,
+			MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+			(LPSTR)&errMsg,
+			sizeof(errMsg), NULL );
+		//Form2->Label7->Caption = errMsg;
+
 		CloseHandle(file);
 		CloseHandle(partition);
     }
@@ -126,8 +167,8 @@ void __fastcall ReadThread::Execute()
 	buffer = new BYTE[bufferSize];
 
 	//Индикатор % чтения
-    int p = 0;
-    __int64 s = 0;
+	int p = 0;
+	__int64 s = 0;
 	__int64 t = (partitionInfo.PartitionLength.QuadPart / bufferSize) / 100;
 
 
@@ -142,17 +183,30 @@ void __fastcall ReadThread::Execute()
 			CloseHandle(file);
 			CloseHandle(partition);
 			Form2->Label5->Visible = True;
-			Form2->Label5->Caption = "Ошибка копирования";
+			Form2->Label5->Caption = "Ошибка чтения";
 		}
 
-        result = WriteFile(file, buffer, bytesReturned, &bytesWritten, NULL);
+		result = WriteFile(file, buffer, bytesReturned, &bytesWritten, NULL);
 		if (!result)
 		{
 			delete[] buffer;
 			CloseHandle(file);
 			CloseHandle(partition);
 			Form2->Label5->Visible = True;
-			Form2->Label5->Caption = "Ошибка копирования";
+			Form2->Label5->Caption = "Ошибка записи, недостаточно места на диске";
+
+			char errMsg[65];
+			DWORD dw = GetLastError();
+
+			FormatMessageA(
+				FORMAT_MESSAGE_FROM_SYSTEM |
+				FORMAT_MESSAGE_IGNORE_INSERTS,
+				NULL,
+				dw,
+				MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+				(LPSTR)&errMsg,
+				sizeof(errMsg), NULL );
+			//Form2->Label7->Caption = errMsg;
 		}
 
 		if (!(s++ % (t)))
