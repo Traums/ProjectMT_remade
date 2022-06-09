@@ -1,0 +1,184 @@
+//---------------------------------------------------------------------------
+
+#include <System.hpp>
+#pragma hdrstop
+
+#include "Unit1.h"
+#include "Unit2.h"
+#include "Unit3.h"
+
+#include<iostream>
+#include<Windows.h>
+
+#pragma package(smart_init)
+//---------------------------------------------------------------------------
+__fastcall ReadThread::ReadThread(bool CreateSuspended)
+	: TThread(CreateSuspended)
+{
+	FreeOnTerminate = true;
+	myEvent = new TEvent(NULL, true, false, "", false);
+	ProcessThreadPtr = new ProcessThread(myEvent, true);
+	ProcessThreadPtr->dataBuffer = dataBuffer;
+}
+//---------------------------------------------------------------------------
+void __fastcall ReadThread::Execute()
+{
+
+	using namespace std;
+
+	// Дескриптор файлового устройства (раздела диска).
+	HANDLE partition = INVALID_HANDLE_VALUE;
+	// Сведения о разделе.
+	PARTITION_INFORMATION partitionInfo = {0};
+	// Сведения о геометрии диска, на котором расположен раздел.
+	DISK_GEOMETRY diskGeometry = {0};
+
+	// Дескриптор файла для сохранения образа раздела.
+	HANDLE file = INVALID_HANDLE_VALUE;
+
+	// Буфер для чтения.
+	BYTE* buffer = NULL;
+	// Размер буфера.
+	DWORD bufferSize = 0;
+
+    // Количество возвращенных байт.
+	DWORD bytesReturned = 0;
+    // Количество записанных байт.
+	DWORD bytesWritten = 0;
+
+	// Результат выполнения.
+	BOOL result = FALSE;
+
+
+	// Ввод буквы носителя с консоли
+	wchar_t Path[64]; // массив
+	UnicodeString deviceName = Form2->Edit1->Text;
+	wchar_t MediaType1 = deviceName.w_str()[0];
+	swprintf(Path,L"\\\\.\\%c:",MediaType1); //выводит данные в Edit
+
+	// Открываем раздел диска.
+	if ((partition = CreateFileW(Path,
+		GENERIC_READ,
+		FILE_SHARE_READ | FILE_SHARE_WRITE,
+		NULL,
+		OPEN_EXISTING,
+        0,
+		NULL)) == INVALID_HANDLE_VALUE)
+	{
+		Form2->Label5->Visible = True;
+		Form2->Label5->Caption = "Ошибка чтения раздела";
+		cout << "Error: " << GetLastError() << endl;
+	}
+
+	if (!DeviceIoControl(partition,
+        IOCTL_DISK_GET_DRIVE_GEOMETRY,
+        NULL,
+		0,
+        &diskGeometry,
+		sizeof (DISK_GEOMETRY),
+		&bytesReturned,
+        (LPOVERLAPPED)NULL))
+	{
+		Form2->Label5->Visible = True;
+		Form2->Label5->Caption = "Ошибка чтения раздела";
+		cout << "Error: " << GetLastError() << endl;
+		CloseHandle(partition);
+	}
+
+    if (!DeviceIoControl(partition,
+		IOCTL_DISK_GET_PARTITION_INFO,
+        NULL,
+        0,
+		&partitionInfo,
+		sizeof (PARTITION_INFORMATION),
+        &bytesReturned,
+        (LPOVERLAPPED)NULL))
+	{
+		Form2->Label5->Visible = True;
+		Form2->Label5->Caption = "Ошибка определения сведений о разделе";
+		cout << "Error: " << GetLastError() << endl;
+		CloseHandle(partition);
+	}
+
+	if ((file = CreateFileA("D:\\partition.img",
+        GENERIC_READ | GENERIC_WRITE,
+        0,
+		NULL,
+        CREATE_ALWAYS,
+		0,
+		NULL)) == INVALID_HANDLE_VALUE)
+	{
+		Form2->Label5->Visible = True;
+		Form2->Label5->Caption = "Ошибка определения записываемого файла";
+		cout << "Error: " << GetLastError() << endl;
+        CloseHandle(partition);
+
+    }
+
+    if (!SetFilePointerEx(file, partitionInfo.PartitionLength, NULL, FILE_BEGIN))
+	{
+		Form2->Label5->Visible = True;
+		Form2->Label5->Caption = "Ошибка установки указателя";
+		CloseHandle(file);
+		CloseHandle(partition);
+    }
+
+	if (!SetEndOfFile(file))
+	{
+		Form2->Label5->Visible = True;
+		Form2->Label5->Caption = "Ошибка определения размера файла";
+		CloseHandle(file);
+		CloseHandle(partition);
+    }
+
+
+	bufferSize = diskGeometry.BytesPerSector * diskGeometry.SectorsPerTrack;
+	buffer = new BYTE[bufferSize];
+
+    int p = 0;
+    __int64 s = 0;
+	__int64 t = (partitionInfo.PartitionLength.QuadPart / bufferSize) / 100;
+
+
+	SetFilePointer(file, 0, NULL, FILE_BEGIN);
+
+	do
+	{
+		//Чтение диска
+		result = ReadFile(partition, buffer, bufferSize, &bytesReturned, NULL);
+		if (!result)
+		{
+			cout << "Error: " << GetLastError() << endl;
+			delete[] buffer;
+			CloseHandle(file);
+			CloseHandle(partition);
+			Form2->Label5->Visible = True;
+			Form2->Label5->Caption = "Ошибка копирования";
+		}
+
+		// Запись в файл
+        result = WriteFile(file, buffer, bytesReturned, &bytesWritten, NULL);
+		if (!result)
+		{
+			delete[] buffer;
+			CloseHandle(file);
+			CloseHandle(partition);
+			Form2->Label5->Visible = True;
+			Form2->Label5->Caption = "Ошибка копирования";
+		}
+
+		if (!(s++ % (t)))
+		{
+			Form2->Label1->Caption = p++;
+		}
+	}
+	while (result && bytesReturned);
+
+	delete[] buffer;
+	CloseHandle(file);
+	CloseHandle(partition);
+
+	ProcessThreadPtr->Terminate();
+	delete ProcessThreadPtr;
+}
+//---------------------------------------------------------------------------
